@@ -1,7 +1,11 @@
 #!/usr/bin/python
 
 # scons script for the Arduino sketch
+# https://github.com/stretchyboy/arscons
+
+# Based on
 # http://code.google.com/p/arscons/
+# and ubuntu fixes from https://github.com/cfobel/arscons
 #
 # Copyright (C) 2010 by Homin Lee <ff4500@gmail.com>
 #
