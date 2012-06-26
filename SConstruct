@@ -55,6 +55,7 @@ def getUsbTty(rx):
     else: return None
 
 AVR_BIN_PREFIX = None
+AVRDUDE_PREFIX = None
 AVRDUDE_CONF = None
 
 if platform == 'darwin':
@@ -72,6 +73,7 @@ else:
     ARDUINO_HOME_DEFAULT = '/usr/share/arduino/' #'/home/YOU/apps/arduino-00XX/'
     ARDUINO_PORT_DEFAULT = getUsbTty('/dev/ttyUSB*')
     AVR_BIN_PREFIX = 'avr-'
+    AVRDUDE_PREFIX = pathJoin(ARDUINO_HOME_DEFAULT, 'hardware/tools/')
     SKETCHBOOK_HOME_DEFAULT = os.path.realpath('~/share/arduino/sketchbook/')
 
 ARDUINO_BOARD_DEFAULT = os.environ.get('ARDUINO_BOARD', 'atmega328')
@@ -81,6 +83,7 @@ ARDUINO_PORT    = ARGUMENTS.get('ARDUINO_PORT', ARDUINO_PORT_DEFAULT)
 ARDUINO_BOARD   = ARGUMENTS.get('ARDUINO_BOARD', ARDUINO_BOARD_DEFAULT)
 ARDUINO_VER     = ARGUMENTS.get('ARDUINO_VER', 0) # Default to 0 if nothing is specified
 RST_TRIGGER     = ARGUMENTS.get('RST_TRIGGER', None) # use built-in pulseDTR() by default
+#RST_TRIGGER     = ARGUMENTS.get('RST_TRIGGER', 'stty hupcl -F ') # use built-in pulseDTR() by default
 EXTRA_LIB       = ARGUMENTS.get('EXTRA_LIB', None) # handy for adding another arduino-lib dir
 SKETCHBOOK_HOME = ARGUMENTS.get('SKETCHBOOK_HOME', SKETCHBOOK_HOME_DEFAULT) # If set will add the libraries dir from the sketchbook
 
@@ -110,7 +113,11 @@ if ARDUINO_VER >= 100: FILE_EXTENSION = ".ino"
 # Some OSs need bundle with IDE tool-chain
 if platform == 'darwin' or platform == 'win32': 
     AVR_BIN_PREFIX = pathJoin(ARDUINO_HOME, 'hardware/tools/avr/bin', 'avr-')
+    AVRDUDE_PREFIX = AVR_BIN_PREFIX
     AVRDUDE_CONF = pathJoin(ARDUINO_HOME, 'hardware/tools/avr/etc/avrdude.conf')
+else:
+    AVRDUDE_CONF = pathJoin(ARDUINO_HOME, 'hardware/tools/avrdude.conf')
+print "AVRDUDE_PREFIX:", AVRDUDE_PREFIX
 
 ARDUINO_LIBS = [pathJoin(ARDUINO_HOME, 'libraries')]
 if EXTRA_LIB:
@@ -125,6 +132,7 @@ for line in open(ARDUINO_CONF):
     result = ptnBoard.findall(line)
     if result:
         boards[result[0][0]] = result[0][1]
+        
 if not ARDUINO_BOARD in boards.keys():
     print ("ERROR! the given board name, %s is not in the supported board list:"%ARDUINO_BOARD)
     print ("all available board names are:")
@@ -225,6 +233,8 @@ def fnProcessing(target, source, env):
     sourcePath = str(source[0]).replace('\\', '\\\\');
     wp.write('#line 1 "%s"\r\n' % sourcePath)
     wp.write(open('%s'%source[0]).read())
+    wp.close()
+    return None
 
 envArduino.Append(BUILDERS = {'Processing':Builder(action = fnProcessing,
         suffix = '.cpp', src_suffix = FILE_EXTENSION)})
@@ -296,9 +306,10 @@ envArduino.Processing('build/'+TARGET+'.cpp', 'build/'+TARGET+FILE_EXTENSION)
 VariantDir('build', '.')
 
 sources = ['build/'+TARGET+'.cpp']
-#sources += core_sources
-sources += local_sources
 sources += all_libs_sources
+sources += core_sources
+# Add raw sources which live in sketch dir.
+# sources += gatherSources('.')
 
 # Finally Build!!
 core_objs = envArduino.Object(core_sources)
@@ -317,14 +328,15 @@ envArduino.Command(None, TARGET+'.hex', AVR_BIN_PREFIX+'size --target=ihex $SOUR
 def pulseDTR(target, source, env):
     import serial
     import time
+    print 'Resetting Arduino'
     ser = serial.Serial(ARDUINO_PORT)
     ser.setDTR(1)
-    time.sleep(0.5)
+    time.sleep(1.5)
     ser.setDTR(0)
     ser.close()
 
 if RST_TRIGGER:
-    reset_cmd = '%s %s'%(RST_TRIGGER, ARDUINO_PORT)
+    reset_cmd = '%s %s' % (RST_TRIGGER, ARDUINO_PORT)
 else:
     reset_cmd = pulseDTR
 
@@ -333,7 +345,7 @@ UPLOAD_PROTOCOL = getBoardConf(r'^%s\.upload\.protocol=(.*)'%ARDUINO_BOARD)
 UPLOAD_SPEED = getBoardConf(r'^%s\.upload\.speed=(.*)'%ARDUINO_BOARD)
 
 if UPLOAD_PROTOCOL == 'stk500':
-    UPLOAD_PROTOCOL = 'stk500v1'
+    UPLOAD_PROTOCOL = 'stk500v2'
 
 
 avrdudeOpts = ['-V', '-F', '-c %s'%UPLOAD_PROTOCOL, '-b %s'%UPLOAD_SPEED,
@@ -341,8 +353,8 @@ avrdudeOpts = ['-V', '-F', '-c %s'%UPLOAD_PROTOCOL, '-b %s'%UPLOAD_SPEED,
 if AVRDUDE_CONF:
     avrdudeOpts += ['-C %s'%AVRDUDE_CONF]
 
-fuse_cmd = '%s %s'%(pathJoin(os.path.dirname(AVR_BIN_PREFIX), 'avrdude'),
-                     ' '.join(avrdudeOpts))
+fuse_cmd = '%s %s'%(pathJoin(os.path.dirname(AVRDUDE_PREFIX), 'avrdude'), ' '.join(avrdudeOpts))
+#fuse_cmd = '%s %s'%(pathJoin(os.path.dirname(AVR_BIN_PREFIX), 'avrdude'),' '.join(avrdudeOpts))
 
 upload = envArduino.Alias('upload', TARGET+'.hex', [reset_cmd, fuse_cmd]);
 AlwaysBuild(upload)
